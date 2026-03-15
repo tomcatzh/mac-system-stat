@@ -1,0 +1,16 @@
+# Compiled Swift helpers (auto-built on first run)
+scripts/bin/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
