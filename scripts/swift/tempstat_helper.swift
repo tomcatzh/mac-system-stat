@@ -213,7 +213,6 @@ let probes: [SensorProbe] = [
     SensorProbe(key: "Ts0P", label: "SoC proximity", group: "soc"),
     SensorProbe(key: "TB0T", label: "Battery", group: "battery"),
     SensorProbe(key: "TW0P", label: "Wireless", group: "board"),
-    SensorProbe(key: "Ta0P", label: "Ambient", group: "ambient"),
 ]
 
 let encoder = JSONEncoder()
