@@ -10,6 +10,7 @@ from _swift_helper import emit_failure, run_helper
 
 
 SYSTEM_PROFILER = "/usr/sbin/system_profiler"
+UTILIZATION_NOTE = "IOAccelerator utilization is a point-in-time private registry snapshot; sample repeatedly or cross-check powerstat GPU watts for bursty workloads."
 
 
 def system_profiler_gpu() -> List[Dict[str, Any]]:
@@ -60,6 +61,11 @@ def main() -> int:
     cards = helper.get("cards", [])
     chosen = select_card(cards)
     perf = chosen.get("performance_statistics", {})
+    notes = helper.get("notes", [])
+    if perf:
+        notes = [*notes, UTILIZATION_NOTE]
+    else:
+        notes = [*notes, "IOAccelerator PerformanceStatistics not found on this host / OS build."]
 
     payload = {
         **machine_meta(),
@@ -98,7 +104,7 @@ def main() -> int:
             "registry_card_count": len(cards),
             "registry_notes": helper.get("notes", []),
         },
-        "notes": helper.get("notes", []) if perf else helper.get("notes", []) + ["IOAccelerator PerformanceStatistics not found on this host / OS build."],
+        "notes": notes,
     }
     json_dump(payload)
     return 0

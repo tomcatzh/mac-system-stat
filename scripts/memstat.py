@@ -2,21 +2,38 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from _common import bytes_human, clamp_percent, json_dump, machine_meta, parse_size_to_bytes, run
+from _common import bytes_human, clamp_percent, json_dump, machine_meta, parse_size_to_bytes, run_result
 
 
-def mem_total_bytes() -> Optional[int]:
-    out = run(["/usr/sbin/sysctl", "-n", "hw.memsize"])
+SYSCTL = "/usr/sbin/sysctl"
+VM_STAT = "/usr/bin/vm_stat"
+MEMORY_PRESSURE = "/usr/bin/memory_pressure"
+
+
+def probe_error(probe: str, message: str, details: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"probe": probe, "error": message}
+    if details:
+        payload.update(details)
+    return payload
+
+
+def mem_total_bytes() -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
+    result = run_result([SYSCTL, "-n", "hw.memsize"])
+    if not result.ok:
+        return None, probe_error("hw.memsize", "sysctl failed", result.error_dict())
     try:
-        return int(out.strip())
+        return int(result.text), None
     except Exception:
-        return None
+        return None, probe_error("hw.memsize", "failed to parse memory total", {"raw": result.text[:500]})
 
 
-def vm_stats() -> Dict[str, int]:
-    out = run(["vm_stat"])
+def vm_stats() -> Tuple[Dict[str, int], Optional[Dict[str, Any]]]:
+    result = run_result([VM_STAT])
+    if not result.ok:
+        return {"page_size": 4096}, probe_error("vm_stat", "vm_stat failed", result.error_dict())
+    out = result.text
     page_size = 4096
     match = re.search(r"page size of (\d+) bytes", out)
     if match:
@@ -28,17 +45,22 @@ def vm_stats() -> Dict[str, int]:
             continue
         key = match.group(1).strip().lower().replace(" ", "_").replace('"', "")
         stats[key] = int(match.group(2))
-    return stats
+    if len(stats) == 1:
+        return stats, probe_error("vm_stat", "failed to parse vm_stat output", {"raw": out[:500]})
+    return stats, None
 
 
-def swap_usage() -> Dict[str, Any]:
-    out = run(["/usr/sbin/sysctl", "vm.swapusage"])
+def swap_usage() -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    result = run_result([SYSCTL, "vm.swapusage"])
+    if not result.ok:
+        return {"raw": result.text}, probe_error("vm.swapusage", "sysctl failed", result.error_dict())
+    out = result.text
     match = re.search(
         r"total = ([0-9.]+(?:[KMGTP]B?|[KMGTP]))\s+used = ([0-9.]+(?:[KMGTP]B?|[KMGTP]))\s+free = ([0-9.]+(?:[KMGTP]B?|[KMGTP]))",
         out,
     )
     if not match:
-        return {"raw": out}
+        return {"raw": out}, probe_error("vm.swapusage", "failed to parse swap usage", {"raw": out[:500]})
     total_s, used_s, free_s = match.groups()
     return {
         "total_bytes": parse_size_to_bytes(total_s),
@@ -47,11 +69,14 @@ def swap_usage() -> Dict[str, Any]:
         "total_human": total_s,
         "used_human": used_s,
         "free_human": free_s,
-    }
+    }, None
 
 
-def memory_pressure() -> Dict[str, Any]:
-    out = run(["memory_pressure"])
+def memory_pressure() -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    result = run_result([MEMORY_PRESSURE])
+    if not result.ok:
+        return {"free_percent": None, "status": "unknown", "raw": result.text}, probe_error("memory_pressure", "memory_pressure failed", result.error_dict())
+    out = result.text
     percent = None
     for line in out.splitlines():
         if "System-wide memory free percentage" in line:
@@ -66,7 +91,8 @@ def memory_pressure() -> Dict[str, Any]:
             status = "critical"
         elif percent < 20:
             status = "elevated"
-    return {"free_percent": percent, "status": status, "raw": out}
+    error = None if percent is not None else probe_error("memory_pressure", "free percentage not found", {"raw": out[:500]})
+    return {"free_percent": percent, "status": status if percent is not None else "unknown", "raw": out}, error
 
 
 def risk_level(total: Optional[int], used_bytes: int, compressed_bytes: int, swap_used_bytes: Optional[int], free_percent: Optional[float]) -> str:
@@ -83,10 +109,20 @@ def risk_level(total: Optional[int], used_bytes: int, compressed_bytes: int, swa
 
 
 def main() -> int:
-    total = mem_total_bytes()
-    vm = vm_stats()
-    pressure = memory_pressure()
-    swap = swap_usage()
+    errors: List[Dict[str, Any]] = []
+
+    total, error = mem_total_bytes()
+    if error:
+        errors.append(error)
+    vm, error = vm_stats()
+    if error:
+        errors.append(error)
+    pressure, error = memory_pressure()
+    if error:
+        errors.append(error)
+    swap, error = swap_usage()
+    if error:
+        errors.append(error)
 
     page_size = vm.get("page_size", 4096)
     free = vm.get("pages_free", 0) * page_size
@@ -103,6 +139,7 @@ def main() -> int:
     payload = {
         **machine_meta(),
         "kind": "memstat",
+        "supported": total is not None and "pages_active" in vm,
         "page_size_bytes": page_size,
         "memory": {
             "total_bytes": total,
@@ -130,9 +167,10 @@ def main() -> int:
             "vm_stat": vm,
             "memory_pressure_excerpt": pressure.get("raw", "").splitlines()[:20],
         },
+        "errors": errors,
     }
     json_dump(payload)
-    return 0
+    return 0 if payload["supported"] and not errors else 1
 
 
 if __name__ == "__main__":

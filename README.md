@@ -65,11 +65,22 @@ cp -R . ~/.agents/skills/mac-system-stat
 ## How it works
 
 - **memstat/cpustat**: Pure Python, uses `vm_stat`, `sysctl`, `top`, `ps`
-- **gpustat**: Python + Swift helper reading `IOAccelerator` via IOKit (non-privileged)
+- **gpustat**: Python + Swift helper reading `IOAccelerator` via IOKit (non-privileged). Utilization is a point-in-time private registry snapshot; for bursty workloads, sample repeatedly or cross-check GPU watts from `powerstat`.
 - **powerstat**: Python + Swift helper sampling `IOReport` Energy Model channels (non-privileged)
 - **fanstat/tempstat**: Python + Swift helpers reading `AppleSMC` via IOKit (non-privileged)
 
 All helpers run without sudo. For deeper stats: `sudo powermetrics --samplers tasks,cpu_power,gpu_power -n 1`
+
+## GPU interpretation
+
+For MLX/oMLX and other Metal compute workloads, read `gpustat` and `powerstat` together:
+
+- `gpustat` `device` is the useful IOAccelerator activity counter.
+- `renderer` and `tiler` can stay near 0 for compute workloads.
+- `powerstat` `gpu` watts is the cross-check for sustained GPU activity.
+
+Typical idle/light desktop: `device=0%`, `gpu~0.005W`.
+Typical active Metal/MLX compute: `device=93-100%`, `gpu~45-70W`.
 
 ## Example output
 

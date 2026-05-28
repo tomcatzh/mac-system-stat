@@ -31,6 +31,7 @@ These are good enough for quick capacity judgment, especially for local-model wo
 - GPU model and core count are reliably read from IORegistry
 - Live utilization (device/renderer/tiler %) comes from `IOAccelerator` `PerformanceStatistics`
 - These are Apple-private registry properties, not a documented public API
+- The utilization percentages are point-in-time snapshots and can miss bursty GPU work; sample repeatedly or cross-check `powerstat` GPU watts before concluding that a workload is not using the GPU
 - Non-privileged built-ins do not expose a clean GPU utilization percentage like `nvidia-smi`
 - For deeper live stats, use `powermetrics` with user approval
 
@@ -51,8 +52,8 @@ These are good enough for quick capacity judgment, especially for local-model wo
 
 ## Temperature sensors
 
-- Curated AppleSMC key list: Tp0P, Tp0T, Te0T, Ts0P, TB0T, TW0P, Ta0P
+- Current curated AppleSMC key list: Tp0P, Tp0T, Te0T, Ts0P, TB0T, TW0P
 - Values outside -40°C to 140°C filtered as invalid
-- Ambient sensor (Ta0P) measures internal intake point, not room temperature
+- Ta0P is sometimes described as ambient/internal-intake temperature, but it is not enabled by default because it produced implausible values on the observed M4 Max test host; re-probe before enabling it for a specific SoC
 - `pmset -g therm` complements raw temps with system-level thermal state
 - Future SoCs may expose different key names

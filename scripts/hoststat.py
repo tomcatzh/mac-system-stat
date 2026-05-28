@@ -15,13 +15,28 @@ SCRIPTS = ["memstat.py", "cpustat.py", "gpustat.py", "powerstat.py", "fanstat.py
 
 
 def run_helper(path: Path) -> Tuple[str, Dict[str, Any]]:
-    proc = subprocess.run([sys.executable, str(path)], capture_output=True, text=True, timeout=40)
-    if proc.returncode != 0:
-        return path.name, {"ok": False, "error": (proc.stderr or proc.stdout).strip()}
+    try:
+        proc = subprocess.run([sys.executable, str(path)], capture_output=True, text=True, timeout=40)
+    except subprocess.TimeoutExpired as e:
+        return path.name, {
+            "ok": False,
+            "error": f"timeout after 40s",
+            "stdout": (e.stdout or "")[:500] if isinstance(e.stdout, str) else "",
+            "stderr": (e.stderr or "")[:500] if isinstance(e.stderr, str) else "",
+        }
+    except Exception as e:
+        return path.name, {"ok": False, "error": str(e)}
+
     try:
         data = json.loads(proc.stdout)
     except Exception as e:
+        error = (proc.stderr or proc.stdout).strip()
+        if proc.returncode != 0:
+            return path.name, {"ok": False, "error": error or f"helper exited {proc.returncode}", "raw": proc.stdout[:500]}
         return path.name, {"ok": False, "error": f"invalid json: {e}", "raw": proc.stdout[:500]}
+
+    if proc.returncode != 0:
+        return path.name, {"ok": False, "data": data, "error": (proc.stderr or "").strip() or f"helper exited {proc.returncode}"}
     return path.name, {"ok": True, "data": data}
 
 
@@ -105,10 +120,12 @@ def main() -> int:
     for name in SCRIPTS:
         _, result = run_helper(root / name)
         key = name.removesuffix(".py")
-        if result.get("ok"):
+        if "data" in result:
             collected[key] = result["data"]
-        else:
-            errors[key] = result
+        if not result.get("ok"):
+            errors[key] = {k: v for k, v in result.items() if k != "data"}
+        elif result.get("data", {}).get("errors"):
+            errors[key] = {"ok": True, "errors": result["data"]["errors"]}
 
     payload = {
         **machine_meta(),
@@ -120,6 +137,8 @@ def main() -> int:
 
     if args.text:
         print(payload["summary"])
+        if errors:
+            print("Errors: " + ", ".join(sorted(errors)), file=sys.stderr)
     else:
         json_dump(payload)
     return 0 if not errors else 1

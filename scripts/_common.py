@@ -6,26 +6,78 @@ import math
 import platform
 import re
 import subprocess
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 ZSH = "/bin/zsh"
 
 
-def run(cmd: List[str], timeout: int = 15) -> str:
+def _text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+@dataclass
+class CommandResult:
+    cmd: Union[List[str], str]
+    stdout: str = ""
+    stderr: str = ""
+    returncode: Optional[int] = None
+    error: Optional[str] = None
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None and self.returncode == 0
+
+    @property
+    def text(self) -> str:
+        return (self.stdout or self.stderr or "").strip()
+
+    def error_dict(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "command": self.cmd,
+            "returncode": self.returncode,
+        }
+        if self.error:
+            payload["error"] = self.error
+        if self.stderr:
+            payload["stderr"] = self.stderr.strip()[:1000]
+        if self.stdout:
+            payload["stdout"] = self.stdout.strip()[:1000]
+        return payload
+
+
+def run_result(cmd: List[str], timeout: int = 15) -> CommandResult:
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        return CommandResult(cmd=cmd, stdout=_text(e.stdout), stderr=_text(e.stderr), error=f"timeout after {timeout}s")
     except Exception as e:
-        return f"ERROR: {e}"
-    return (p.stdout or p.stderr or "").strip()
+        return CommandResult(cmd=cmd, error=str(e))
+    return CommandResult(cmd=cmd, stdout=p.stdout or "", stderr=p.stderr or "", returncode=p.returncode)
+
+
+def run_shell_result(cmd: str, timeout: int = 20) -> CommandResult:
+    try:
+        p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout, executable=ZSH)
+    except subprocess.TimeoutExpired as e:
+        return CommandResult(cmd=cmd, stdout=_text(e.stdout), stderr=_text(e.stderr), error=f"timeout after {timeout}s")
+    except Exception as e:
+        return CommandResult(cmd=cmd, error=str(e))
+    return CommandResult(cmd=cmd, stdout=p.stdout or "", stderr=p.stderr or "", returncode=p.returncode)
+
+
+def run(cmd: List[str], timeout: int = 15) -> str:
+    return run_result(cmd, timeout=timeout).text
 
 
 def run_shell(cmd: str, timeout: int = 20) -> str:
-    try:
-        p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout, executable=ZSH)
-    except Exception as e:
-        return f"ERROR: {e}"
-    return (p.stdout or p.stderr or "").strip()
+    return run_shell_result(cmd, timeout=timeout).text
 
 
 def json_dump(payload: Dict[str, Any]) -> None:
@@ -56,7 +108,7 @@ def parse_size_to_bytes(value: str) -> Optional[int]:
 
 
 def now_iso() -> str:
-    return run(["date", "+%Y-%m-%dT%H:%M:%S%z"])
+    return datetime.now().astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")
 
 
 def machine_meta() -> Dict[str, Any]:

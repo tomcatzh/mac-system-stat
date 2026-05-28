@@ -29,6 +29,8 @@ def read_thermal_status() -> Dict[str, Any]:
     text = (proc.stdout or proc.stderr or "").strip()
     if proc.returncode != 0:
         return {"available": False, "notes": [text or f"pmset therm exited {proc.returncode}"]}
+    if re.search(r"(^|\n)\s*Error:", text):
+        return {"available": False, "raw": text, "notes": [text]}
 
     status: Dict[str, Any] = {"available": bool(text), "raw": text, "notes": []}
     for pattern, patch in THERM_PATTERNS:

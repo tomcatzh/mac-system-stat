@@ -64,6 +64,8 @@ private func takeSnapshot(subscription: IOReportSubscriptionRef, channels: CFMut
 
     var result: [String: (unit: String, joules: Double)] = [:]
     for itemAny in items {
+        let cfItem = itemAny as CFTypeRef
+        guard CFGetTypeID(cfItem) == CFDictionaryGetTypeID() else { continue }
         let item = itemAny as! CFDictionary
         guard let group = IOReportChannelGetGroup(item)?.takeUnretainedValue() as String?, group == "Energy Model",
               let name = IOReportChannelGetChannelName(item)?.takeUnretainedValue() as String?,

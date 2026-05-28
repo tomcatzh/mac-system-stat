@@ -52,10 +52,33 @@ Prioritize these signals for local-model readiness:
 
 1. **Memory headroom** — total, available-ish, compressed, swap used. High swap or compressed → call it out.
 2. **Current contention** — CPU idle %, load average, top processes. If a few heavy processes dominate, name them.
-3. **GPU** — model and core count are reliable. Live utilization (device/renderer/tiler %) comes from IOAccelerator `PerformanceStatistics`.
+3. **GPU** — model and core count are reliable. Live utilization (device/renderer/tiler %) comes from IOAccelerator `PerformanceStatistics` and is a point-in-time private registry snapshot; for bursty LLM workloads, sample repeatedly or cross-check `powerstat` GPU watts before concluding that GPU is idle.
 4. **Power** — CPU/GPU/ANE/DRAM watt draw from IOReport Energy Model. Values are short-window averages, not hardware-meter absolutes.
-5. **Temperature** — CPU, battery, ambient from AppleSMC. `pmset -g therm` for system thermal state.
+5. **Temperature** — CPU, battery, and selected board sensors from AppleSMC. `pmset -g therm` for system thermal state.
 6. **Fans** — RPM from AppleSMC. 0 RPM on Apple Silicon can mean fans are currently stopped, not unreadable.
+
+## GPU Reading Notes
+
+Use `scripts/gpustat` and `scripts/powerstat --interval-ms 1000` together when judging GPU activity.
+
+- `gpustat.utilization_percent.device` is the best available non-privileged live GPU activity signal from IOAccelerator.
+- `renderer` and `tiler` are graphics-pipeline counters. For Metal/MLX compute workloads they can stay `0` even when the GPU is busy.
+- `powerstat.subsystem_power_watts.gpu` is the best cross-check for sustained GPU compute. Tens of watts means the GPU is active even if a single utilization sample is `0`.
+- For bursty LLM workloads, take several samples during active token generation before concluding the GPU is idle.
+
+Typical samples:
+
+```text
+Idle/light desktop:
+  gpustat device=0%, renderer=0%, tiler=0%
+  powerstat gpu~0.005W
+
+Active Metal/MLX compute:
+  gpustat device=93-100%, renderer often 0-5%, tiler often 0-5%
+  powerstat gpu~45-70W
+```
+
+Do not report "GPU is idle" only because `renderer` or `tiler` is `0`. For MLX/oMLX, use `device` plus GPU watts.
 
 ## Output Style
 
